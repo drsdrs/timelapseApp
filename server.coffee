@@ -13,7 +13,7 @@ app.use(express.static(__dirname+"/media"))
 
 # Send client html.
 app.get "/", (req, res) -> res.sendfile __dirname + "/app/index.html"
-
+app.get "/removeImages", (req, res) -> removeImages()
 
 avconv = require('avconv')
 
@@ -34,21 +34,25 @@ sendMovieList = () ->
     app.io.broadcast "movieList", files
 
 
+duringCapture = false
+
 captureImage = ->
+  if duringCapture
+    return console.log("Cant go faster")
+  else duringCapture = true
   if captureRunning then imgCnt++
-  params = [
-    "-f", "video4linux2"
-    "-i", "/dev/video0"
-    "-ss", "0:0:2"
-    "-s", "400x300"
-    "-vframes", "1"
-    "media/captured/"+(imgCnt)+".jpg"
-  ]
-  avconv(params)
-    .on "exit", () ->
-      c.l "exit "+imgCnt
-      data = {imgCnt: imgCnt, captureRunning: captureRunning}
-      app.io.broadcast "refreshImg", data
+
+  spawn("raspistill", [
+      "-t", "2000" # timeout
+      "-w", "400"
+      "-h", "300"
+      "-o", "media/captured/"+(imgCnt)+".jpg"
+    ]
+  ).on "close", (code, signal) ->
+    c.l "exit "+imgCnt
+    duringCapture = false
+    data = {imgCnt: imgCnt, captureRunning: captureRunning}
+    app.io.broadcast "refreshImg", data
 
 convertImg2Mov = (data)->
   imgCnt = 0
@@ -63,11 +67,13 @@ convertImg2Mov = (data)->
   stream = avconv(paramsImg2Mov)
   stream.on "exit", () ->
     c.l "movie done"
-    spawn("rm", ["media/captured", "-r"])
-      .on "close", (code, signal) ->
-        spawn("mkdir", ["media/captured"])
-        sendMovieList()
+    sendMovieList()
 
+removeImages = ->
+  c.l "removeImages"
+  spawn("rm", ["media/captured", "-r"])
+    .on "close", (code, signal) ->
+      spawn("mkdir", ["media/captured"])
 
 ## IO EVENTS
 
